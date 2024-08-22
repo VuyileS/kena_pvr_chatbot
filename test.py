@@ -1,236 +1,180 @@
 import streamlit as st
 import openai
 import os
-import json
-from sqlalchemy import create_engine, inspect
-from langchain.chains import create_sql_query_chain
-from langchain_openai import ChatOpenAI
-from langchain_community.utilities import SQLDatabase
-from langchain_community.tools.sql_database.tool import QuerySQLDataBaseTool
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from operator import itemgetter
+from sqlalchemy import create_engine
+from langchain.llms.openai import OpenAI
+from langchain.agents import create_sql_agent
+from langchain.sql_database import SQLDatabase
+from langchain.agents.agent_types import AgentType
+from langchain.callbacks import StreamlitCallbackHandler
+from langchain.agents.agent_toolkits import SQLDatabaseToolkit
 from snowflake.snowpark import Session
 
 # Streamlit app title
-st.title("Kena PVR Chatbot with SQL Integration")
+st.set_page_config(page_title="Snowflake PVR SQL Querying with LangChain", page_icon="❄️")
+st.title("❄️ Snowflake (PVR) SQL Querying")
 
-# User inputs for Snowflake credentials
-snowflake_username = st.text_input("Snowflake Username")
-snowflake_password = st.text_input("Snowflake Password", type="password")
+# Sidebar login section
+st.sidebar.subheader("Login to Snowflake")
+snowflake_username = st.sidebar.text_input("Snowflake Username", key="username")
+snowflake_password = st.sidebar.text_input("Snowflake Password", type="password", key="password")
 
-# Check if credentials are provided
-if snowflake_username and snowflake_password:
-    # Initialize Snowflake connection parameters
-    connection_parameters = {
-        "account": os.getenv('snowflake_account'),
-        "user": snowflake_username,
-        "password": snowflake_password,
-        "warehouse": os.getenv('snowflake_warehouse'),
-        "database": os.getenv('snowflake_database'),
-        "schema": os.getenv('snowflake_schema')
-    }
+openai_api_key = st.sidebar.text_input(
+    label="OpenAI API Key",
+    type="password",
+)
 
-    try:
-        # Attempt to establish a Snowflake session
-        session = Session.builder.configs(connection_parameters).create()
-        st.success("Login successful!")
+if not snowflake_username or not snowflake_password:
+    st.sidebar.warning("Please enter your Snowflake credentials to log in.")
+    st.stop()
 
-        # Your app's main functionality goes here
-        # Load environment variables
-        openai.api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    st.sidebar.warning("Please add your OpenAI API key to continue.")
+    st.stop()
 
-        # Initialize OpenAI client
-        client = openai
+# Establish Snowflake connection
+connection_parameters = {
+    "account": os.getenv('snowflake_account'),
+    "user": snowflake_username,
+    "password": snowflake_password,
+    "warehouse": os.getenv('snowflake_warehouse'),
+    "database": os.getenv('snowflake_database'),
+    "schema": os.getenv('snowflake_schema')
+}
 
-        # Set a default model
-        if "openai_model" not in st.session_state:
-            st.session_state["openai_model"] = "gpt-3.5-turbo"
+try:
+    session = Session.builder.configs(connection_parameters).create()
+    st.sidebar.success("Login successful!")
+except Exception as e:
+    st.sidebar.error(f"Login failed: {e}")
+    st.stop()
 
-        # Initialize chat history
-        if "messages" not in st.session_state:
-            st.session_state.messages = [{"role": "assistant", "content": "Hello! I am your Kena PVR chatbot. How can I assist you today?"}]
+# Setup OpenAI LLM
+llm = OpenAI(openai_api_key=openai_api_key, temperature=0.1, streaming=True)
 
-        # Display chat messages from history on app rerun
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+# Setup Snowflake DB with SQLAlchemy
+snowflake_url = f"snowflake://{snowflake_username}:{snowflake_password}@{os.getenv('snowflake_account')}/{os.getenv('snowflake_database')}/{os.getenv('snowflake_schema')}?warehouse={os.getenv('snowflake_warehouse')}"
+engine = create_engine(snowflake_url)
+db = SQLDatabase(engine, include_tables=["dim_kena__patient_visit_report"])
 
-        # Accept user input
-        if prompt := st.chat_input("What is up?"):
-            # Add user message to chat history
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            # Display user message in chat message container
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            snowflake_url = f"snowflake://{snowflake_username}:{snowflake_password}@your_account/your_database/your_schema?warehouse=your_warehouse"
+# Create a toolkit for the SQL agent
+toolkit = SQLDatabaseToolkit(db=db, llm=llm)
 
-            # Create SQLAlchemy engine and inspect the database
-            engine = create_engine(snowflake_url)
-            inspector = inspect(engine)
+# Create SQL agent with verbose output and callback handling
+agent = create_sql_agent(
+    llm=llm,
+    toolkit=toolkit,
+    verbose=False,
+    agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+)
 
-            # List all tables in the specified schema to verify the table existence
-            tables = inspector.get_table_names(schema="your_schema")
+# Simplified context from the data dictionary
+context_str = """
+dim_kena__patient_visit_report contains fields such as:
+- CONVERSATION_ID: Unique identifier assigned when a patient initiates a consultation.
+- CONSULTATION_ID: Key linking an event in the Kena app to Clinic consultation data.
+- CREATED_AT: Timestamp when the conversation was initiated upon patient's symptom category selection.
+- ENDED_AT: Timestamp when the conversation concluded, either by clinician or system closure.
+- QUEUE_JOINED_AT: Timestamp marking when the patient joined the clinician queue.
+- QUEUE_ENDED_AT: Timestamp marking when the patient was picked from the clinician queue by a clinician.
+- QUEUE_DURATION: Duration of time the patient spent in the clinician queue.
+- QUEUE_DURATION_IN_SECONDS: Duration of time the patient spent in the clinician queue, in seconds.
+- CONSULT_DURATION: Total duration of time of the consultation.
+- CONSULT_DURATION_IN_SECONDS: Total duration of time of the consultation, in seconds.
+- SNOOZE_DURATION: Total time for all snoozes within a consultation.
+- CONSULT_DURATION_MINUS_SNOOZE: Total duration of the consultation after removing the snooze duration.
+- SNOOZE_COUNT: The total number of times a consultation was snoozed.
+- CLINICIAN_START_AT: Timestamp when the clinician picked the patient from the queue and initiated contact.
+- CLINICIAN_ENDED_AT: Timestamp when the clinician concluded the interaction with the patient.
+- CLINICIAN_DURATION: Duration of time of the row-specific clinician in a consultation.
+- AVERAGE_SNOOZE_PER_CLINICIAN: The average snooze duration per clinician in a consultation.
+- CLINICIAN_DURATION_MINUS_SNOOZE: Duration of time of the row-specific clinician after removing the average snooze duration per clinician.
+- CLINICIAN_DURATION_IN_SECONDS: Duration of time of the row-specific clinician in a consultation, in seconds.
+- STAFF_NAME: Name of the clinician who interacted with the patient.
+- STAFF_ROLE: The role of the corresponding clinician.
+- ASSIGNMENT_ORDER: The order in which the clinician saw the patient.
+- STAFF_VIEWS: The total number of clinicians assigned to the consultations.
+- CONVERSATION_TYPE: Mode of consultation.
+- CLINICIAN_ROLES_IN_CONSULT: The roles of all clinicians in the consultation.
+- CATEGORY: Symptom category tile selected at the start of the consultation.
+- RATED_AT: Timestamp for when the patient completed their rating on the Kena app.
+- RATING: Patient's rating for the overall consultation (positive or negative).
+- KENA_USER_ID: Unique identifier for the patient within the Kena users database.
+- PATIENT_GENDER: Gender of the patient.
+- PATIENT_AGE: Age of the patient at the time of consultation.
+- AGE_CATEGORY: Age category the patient falls in.
+- PRIMARY_ICD10_CODE: The main symptom the patient is consulting for.
+- REFERRAL_LETTER: The referral letter sent to patients within the consultation.
+- REFERRAL_DOCUMENT_ISSUED: Whether or not a referral document was issued.
+- REFERRAL_CATEGORY: The category type of the referral.
+- REFERRAL_SECTOR: The sector to which the patient is referred.
+- REFERRAL_TYPE: The type of referral selected.
+- REFERRAL_SUBTYPE: The subtypes of the specified referral type.
+- SICK_NOTE_DOCUMENT_ISSUED: Whether or not a sick note document was issued.
+- SCRIPT_DOCUMENT_ISSUED: Whether or not a prescription note was issued.
+- ATTENDANCE_CERTIFICATE_DOCUMENT_ISSUED: Whether or not an attendance certificate was issued.
+- REGISTRATION_STATUS: Indicates whether the patient completed the registration process in full.
+- INVOICE_ID: Identifier for the consultation's invoice.
+- INVOICE_CREATED_AT: Timestamp when the invoice was generated.
+- AMOUNT: The total amount the consultation was invoiced for.
+- CONSULTATION_TYPE: Type of consultation.
+- BILLED_CATEGORY: Whether the consultation was billed or not.
+- NO_CHARGE_REASON: Reason for no charge if applicable.
+- NOTE: Free text notes associated with the no-charge invoice.
+- TRANSACTION_ID: Identifier for the transaction that occurred against a consultation.
+- TRANSACTION_CREATED_AT: Timestamp when the transaction was recorded.
+- PAYMENT_METHOD: The method of payment used to settle the invoice.
+- PAYMENT_STATUS: The status of the transaction.
+- PROMOTION_CUSTOMER_NAME: The name of the promotion customer.
+- PROMOTION_NAME: The name of the promotion run by the partner.
+- PROMO_CODE: The promotion code provided to customers at consultation payment.
+- USER_ALLOCATED_VOUCHER_PROMO_CODE: The 16-digit voucher code allocated to a user for discount voucher redemption.
+- PROMOTION_ID: The unique promotion identifier.
+- CALL_IN_CONVERSATION: Whether a call occurred during the consultation.
+- PATIENT_CANCELLED: Whether the patient canceled the consultation.
+- CLOSE_REASON: Reason provided for the cancellation of the consultation.
+"""
 
-            if 'dim_kena__patient_visit_report' not in tables:
-                raise ValueError(f"Table 'dim_kena__patient_visit_report' not found in schema 'your_schema'.")
+# Chat UI
+if "messages" not in st.session_state or st.sidebar.button("Clear message history"):
+    st.session_state["messages"] = [{"role": "assistant", "content": "How can I assist you with your PVR queries today?"}]
 
-            # Initialize SQLDatabase from LangChain
-            db = SQLDatabase.from_uri(snowflake_url, sample_rows_in_table_info=1, include_tables=['dim_kena__patient_visit_report'])
+for msg in st.session_state.messages:
+    st.chat_message(msg["role"]).write(msg["content"])
 
-            # Initialize the OpenAI Chat model
-            llm = ChatOpenAI(model=st.session_state["openai_model"], temperature=0.1)
+user_query = st.chat_input(placeholder="Ask me anything about the patient visit report!")
 
-            # Create the SQL query chain
-            generate_query = create_sql_query_chain(llm, db)
+if user_query:
+    st.session_state.messages.append({"role": "user", "content": user_query})
+    st.chat_message("user").write(user_query)
 
-            # Define the data dictionary
-            data_dictionary = {
-                "CONVERSATION_ID": "The unique identifier is assigned when a patient initiates a consultation by selecting a symptom category.",
-                "CONSULTATION_ID": "The unique key linking an event in the Kena app to Clinic consultation data. It is created once the patient first engages with a clinician.",
-                "CREATED_AT": "Timestamp when the conversation was initiated upon patient's symptom category selection.",
-                "ENDED_AT": "Timestamp when the conversation concluded, either by clinician clicking the end consultation button or automatic system closure.",
-                "QUEUE_JOINED_AT": "Timestamp marking when the patient joined the clinician queue.",
-                "QUEUE_ENDED_AT": "Timestamp marking when the patient was picked from the clinician queue by a clinician.",
-                "QUEUE_DURATION": "Duration of time the patient spent in the clinician queue. Specific to the queue step before the clinician indicated in that row.",
-                "QUEUE_DURATION_IN_SECONDS": "Duration of time the patient spent in the clinician queue, in seconds.",
-                "CONSULT_DURATION": "Total duration of time of the consultation. This is measured from the creation of the conversation until either the clinician ends the conversation or the system closes the conversation after 24 hours.",
-                "CONSULT_DURATION_IN_SECONDS": "Total duration of time of the consultation.",
-                "SNOOZE_DURATION": "Total time for all snoozes within a consultation.",
-                "CONSULT_DURATION_MINUS_SNOOZE": "Total duration of the consultation after removing the snooze duration.",
-                "SNOOZE_COUNT": "The total number of times a consultation was snoozed for.",
-                "CLINICIAN_START_AT": "Timestamp when the clinician picked the patient from the queue and initiated contact with the patient.",
-                "CLINICIAN_ENDED_AT": "Timestamp when the clinician concluded the interaction with the patient.",
-                "CLINICIAN_DURATION": "Duration of time of the row-specific clinician in a consultation.",
-                "AVERAGE_SNOOZE_PER_CLINICIAN": "The average snooze duration per clinician in a consultation.",
-                "CLINICIAN_DURATION_MINUS_SNOOZE": "Duration of time of the row-specific clinician in a consultation after removing the average snooze duration per clinician.",
-                "CLINICIAN_DURATION_IN_SECONDS": "Duration of time of the row-specific clinician in a consultation.",
-                "STAFF_NAME": "Name of the clinician who interacted with the patient in the consultation.",
-                "STAFF_ROLE": "The Role of the corresponding clinician.",
-                "ASSIGNMENT_ORDER": "The order in which the clinician saw the patient.",
-                "STAFF_VIEWS": "The total number of clinicians that were assigned to the consultations, all transfers included.",
-                "CONVERSATION_TYPE": "Mode of consultation.",
-                "CLINICIAN_ROLES_IN_CONSULT": "The roles of all clinicians in the consultation.",
-                "CATEGORY": "Symptom category tile selected at start of consultation.",
-                "RATED_AT": "Timestamp for when the patient completed their rating on Kena app.",
-                "RATING": "Patient's rating for the overall consultation (positive or negative).",
-                "KENA_USER_ID": "Unique identifier for the patient within Kena users database.",
-                "PATIENT_GENDER": "Gender of the patient.",
-                "PATIENT_AGE": "Age of the patient at time of consultation.",
-                "AGE_CATEGORY": "Age category the patient falls in.",
-                "PRIMARY_ICD10_CODE": "The main symptom the patient is consulting for. The first ICD10 code diagnosis the patient receives.",
-                "REFERRAL_LETTER": "The referral letter sent to patients within the consultation.",
-                "REFERRAL_DOCUMENT_ISSUED": "This field shows whether or not a referral document was issued by the respective clinician.",
-                "REFERRAL_CATEGORY": "The category type of the referral i.e. whether it’s an investigation emergency etc.",
-                "REFERRAL_SECTOR": "The sector to which the patient is referred to is a dropdown list of the following options: public, private, patient_choice.",
-                "REFERRAL_TYPE": "The type of referral selected from the following choices: Radiology, Pathology, specialist, Private Hospital, allied, GP, Other.",
-                "REFERRAL_SUBTYPE": "These are the subtypes of the specified referral type.",
-                "SICK_NOTE_DOCUMENT_ISSUED": "This field shows whether or not a sick note document was issued by the respective clinician.",
-                "SCRIPT_DOCUMENT_ISSUED": "This field shows whether or not a prescription (script) note was issued by the respective clinician.",
-                "ATTENDANCE_CERTIFICATE_DOCUMENT_ISSUED": "This field shows whether or not an attendance certificate was issued to the patient by the respective clinician.",
-                "REGISTRATION_STATUS": "Indicates whether the patient completed the registration process in full.",
-                "INVOICE_ID": "Identifier for the consultation's invoice.",
-                "INVOICE_CREATED_AT": "Timestamp when the invoice was generated.",
-                "AMOUNT": "The total amount the consultation was invoiced for.",
-                "CONSULTATION_TYPE": "Type of consultation.",
-                "BILLED_CATEGORY": "Whether the consultation was billed or not.",
-                "NO_CHARGE_REASON": "Drop down selector for clinicians to indicate reason for no charge.",
-                "NOTE": "Free text notes associated with the no charged invoice.",
-                "TRANSACTION_ID": "Identifier for the transaction that occurred against a consultation.",
-                "TRANSACTION_CREATED_AT": "Timestamp when the invoice was paid and the transaction was recorded.",
-                "PAYMENT_METHOD": "The method of payment used to settle invoice.",
-                "PAYMENT_STATUS": "The status of the transaction i.e. whether the transaction failed or was a success.",
-                "PROMOTION_CUSTOMER_NAME": "The name of the promotion customer.",
-                "PROMOTION_NAME": "The name of the promotion run by the partner.",
-                "PROMO_CODE": "The promotion code provided to customers to insert at consultation payment.",
-                "USER_ALLOCATED_VOUCHER_PROMO_CODE": "The 16 digit voucher code allocated to a user for discount voucher redemption on the app.",
-                "PROMOTION_ID": "The unique promotion identifier.",
-                "CALL_IN_CONVERSATION": "Boolean indicating whether a call occurred during the consultation.",
-                "PATIENT_CANCELLED": "Boolean indicating whether the patient cancelled the consultation.",
-                "CLOSE_REASON": "Reason provided for the cancellation of the consultation."
-                }
+    # Create the full prompt with context
+    prompt_template = f"""
+    Using the following context into the dim_kena__patient_visit_report table, answer prompts in a contextual manner: {context_str}
 
-            # Convert data dictionary to a string format
-            data_dictionary_str = json.dumps(data_dictionary, indent=2)
+    Question: {{query}}
+    Instructions: 
+    Look in table 'dim_kena__patient_visit_report', there are duplications in the table. Account for duplications by counting distinct records in queries that require counts. 
+    Identify team consultations as those involving more than one staff member.
+    Consider the order of clinicians to determine consultation transfers.
+    Use the 'created_at' field for date-related queries.
+    Utilize multiple CTEs in your query when needed. 
+    Ensure accurate joins between CTEs by using common fields. If no common fields exist, prioritize the CTE with the most insights.
+    When asked about queue durations and clinician durations use the QUEUE_DURATION_IN_SECONDS and CLINICIAN_DURATION_MINUS_SNOOZE respectively which are in seconds, always convert to minutes.
+    """
+    
+    modified_query = prompt_template.format(query=user_query)
 
-            # Create the question with the data dictionary
-            question = f"""Using the following data dictionary: {data_dictionary_str}, 
-                Question: {prompt} ,
-            Instructions: 
-            Look in table 'dim_kena__patient_visit_report', there are duplications in the table. Account for duplications by counting distinct records in queries. 
-            Identify team consultations as those involving more than one staff member.
-            Consider the order of clinicians to determine consultation transfers.
-            Use the 'created_at' field for date-related queries.
-            Utilize multiple CTEs in your query as needed.
-            Ensure accurate joins between CTEs by using common fields. If no common fields exist, prioritize the CTE with the most insights."""
+    with st.chat_message("assistant"):
+        st_cb = StreamlitCallbackHandler(st.container())
+        response = agent.run(modified_query, callbacks=[st_cb])
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.write(response)
 
-            # Generate the SQL query
-            sql_query = generate_query.invoke({"question": question})
-
-            # Function to execute SQL query and handle errors
-            def execute_query(query, session):
-                try:
-                    result = session.sql(query).to_pandas()
-                    return result, None
-                except Exception as e:
-                    return None, str(e)
-
-            # Execute the generated SQL query
-            result, error = execute_query(sql_query, session)
-
-            if error:
-                # Handle SQL execution error
-                st.error(f"Error in SQL query execution: {error}")
-            else:
-                # Rephrase and display the result
-                answer_prompt = PromptTemplate.from_template(
-                    """Given the following user question, corresponding SQL query, and SQL result, answer the user question. In your answer reflect the results of the query. Leave out the instructions given in the question in your response.
-
-                    Question: {question}
-                    SQL Query: {query}
-                    SQL Result: {result}
-                    Answer: """
-                )
-
-                rephrase_answer = answer_prompt | llm | StrOutputParser()
-
-                chain = (
-                    RunnablePassthrough.assign(query=generate_query).assign(
-                        result=itemgetter("query") | QuerySQLDataBaseTool(db=db)
-                    )
-                    | rephrase_answer
-                )
-
-                chain_result = chain.invoke({"question": question})
-
-                # Display assistant response in chat message container
-                with st.chat_message("assistant"):
-                    st.write("Generated SQL Query:")
-                    st.markdown(f"```sql\n{sql_query}\n```")
-                    st.write("Query Results:")
-                    st.write(result)
-                    st.write("Rephrased Answer:")
-                    st.write(chain_result)
-
-                st.session_state.messages.append({"role": "assistant", "content": str(sql_query)})
-                st.session_state.messages.append({"role": "assistant", "content": str(chain_result)})
-
-        # Check if the session state should be cleared
-        if "clear_chat" not in st.session_state:
-            st.session_state.clear_chat = True
-
-        # Clear chat history on rerun or page refresh
-        if st.session_state.clear_chat:
-            st.session_state.messages = [{"role": "assistant", "content": "Hello! I am your Kena PVR chatbot. How can I assist you today?"}]
-            st.session_state.clear_chat = False
-
-        # Close the session at the end
-        session.close()
-
-    except Exception as e:
-        st.error(f"Login failed: {e}")
-
-else:
-    st.warning("Please enter your Snowflake credentials to log in.")
+# Optionally, close the session when the app exits
+if st.sidebar.button("Log out"):
+    if 'session' in st.session_state:
+        st.session_state['session'].close()
+    st.sidebar.success("Logged out.")
+    st.session_state.clear()
+    st.write('<meta http-equiv="refresh" content="0; url=/" />', unsafe_allow_html=True)

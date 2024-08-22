@@ -1,4 +1,4 @@
-data_dictionary = {
+{
     "CONVERSATION_ID": {
         "description": "The unique identifier is assigned when a patient initiates a consultation by selecting a symptom category.",
         "data_type_format": "Varchar",
