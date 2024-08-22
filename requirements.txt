@@ -1,0 +1,13 @@
+langchain_openai
+langchain_community
+langchain
+pymysql
+chromadb
+snowflake-connector-python
+pandas
+snowflake-sqlalchemy
+sqlalchemy
+python-dotenv
+snowflake-snowpark-python
+streamlit
+openai

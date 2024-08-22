@@ -1,0 +1,312 @@
+data_dictionary = {
+    "CONVERSATION_ID": {
+        "description": "The unique identifier is assigned when a patient initiates a consultation by selecting a symptom category.",
+        "data_type_format": "Varchar",
+        "notes": "e.g. 37b1151a-f6b7-4cf2-b0e1-7873f25b3cb3"
+    },
+    "CONSULTATION_ID": {
+        "description": "The unique key linking an event in the Kena app to Clinic consultation data. It is created once the patient first engages with a clinician.",
+        "data_type_format": "Varchar",
+        "notes": "Only populated after Kena v3 launch circa 25 October 2023. e.g. ec0477f5-52f4-4cc8-abb1-c102c435f066"
+    },
+    "CREATED_AT": {
+        "description": "Timestamp when the conversation was initiated upon patient's symptom category selection.",
+        "data_type_format": "Timestamp_ntz (month day, year hh:mm)",
+        "notes": "All times are South African Standard Time. Unique to the row."
+    },
+    "ENDED_AT": {
+        "description": "Timestamp when the conversation concluded, either by clinician clicking the end consultation button or automatic system closure.",
+        "data_type_format": "Timestamp_ntz (month day, year hh:mm)",
+        "notes": "All times are South African Standard Time. Unique to the row."
+    },
+    "QUEUE_JOINED_AT": {
+        "description": "Timestamp marking when the patient joined the clinician queue.",
+        "data_type_format": "Timestamp_ntz (month day, year hh:mm)",
+        "notes": "All times are South African Standard Time. Unique to the row."
+    },
+    "QUEUE_ENDED_AT": {
+        "description": "Timestamp marking when the patient was picked from the clinician queue by a clinician.",
+        "data_type_format": "Timestamp_ntz (month day, year hh:mm)",
+        "notes": "All times are South African Standard Time. STAFF_NAME indicates the clinician who picked the patient from the queue. Unique to the row."
+    },
+    "QUEUE_DURATION": {
+        "description": "Duration of time the patient spent in the clinician queue. Specific to the queue step before the clinician indicated in that row.",
+        "data_type_format": "hh:mm:ss",
+        "notes": "If queue duration is more than 24 hours then only the hh:mm:ss will be shown while days will note be shown in view. Unique to the row. If you are looking for the total across a single consultation you need to aggregate relevant rows."
+    },
+    "QUEUE_DURATION_IN_SECONDS": {
+        "description": "Duration of time the patient spent in the clinician queue, in seconds.",
+        "data_type_format": "Integer",
+        "notes": "Seconds. Unique to the row. If you are looking for the total across a single consultation you need to aggregate relevant rows."
+    },
+    "CONSULT_DURATION": {
+        "description": "Total duration of time of the consultation. This is measured from the creation of the conversation until either the clinician ends the conversation or the system closes the conversation after 24 hours i.e. created_at to ended_at. This includes snooze duration.",
+        "data_type_format": "hh:mm:ss",
+        "notes": "If the consultation duration is more than 24 hours then only the hh:mm:ss will be shown while days will not be shown in view. This is the total across all clinicians involved in a consultation."
+    },
+    "CONSULT_DURATION_IN_SECONDS": {
+        "description": "Total duration of time of the consultation.",
+        "data_type_format": "Integer",
+        "notes": "Seconds. This is the total across all clinicians involved in a consultation."
+    },
+    "SNOOZE_DURATION": {
+        "description": "Total time for all snoozes within a consultation. A consultation is snoozed when a patient cannot be reached or might need to do something else while consulting but needs to come back to the consultation.",
+        "data_type_format": "Integer",
+        "notes": "Seconds. This only populates for consultations done on or after 10th April 2024. This is the total across all clinicians involved in a consultation."
+    },
+    "CONSULT_DURATION_MINUS_SNOOZE": {
+        "description": "Total duration of the consultation after removing the snooze duration.",
+        "data_type_format": "hh:mm:ss",
+        "notes": "Calculated as: CONSULT_DURATION_MINUS_SNOOZE - SNOOZE_DURATION. This is the total across all clinicians involved in a consultation."
+    },
+    "SNOOZE_COUNT": {
+        "description": "The total number of times a consultation was snoozed for.",
+        "data_type_format": "Integer",
+        "notes": None
+    },
+    "CLINICIAN_START_AT": {
+        "description": "Timestamp when the clinician picked the patient from the queue and initiated contact with the patient.",
+        "data_type_format": "Timestamp_ntz (month day, year hh:mm)",
+        "notes": "All times are South African Standard Time. Unique to the row."
+    },
+    "CLINICIAN_ENDED_AT": {
+        "description": "Timestamp when the clinician concluded the interaction with the patient.",
+        "data_type_format": "Timestamp_ntz (month day, year hh:mm)",
+        "notes": "Unique to the row. CLINICIAN_ENDED_AT is different from ENDED_AT if it is not the last clinician involved in the consultation. It is only the same for the last clinician in a consultation. All times are South African Standard Time."
+    },
+    "CLINICIAN_DURATION": {
+        "description": "Duration of time of the row-specific clinician in a consultation.",
+        "data_type_format": "hh:mm:ss",
+        "notes": "Unique to the row. If clinician duration is more than 24 hours then only the hh:mm:ss will be shown while days will note be shown in view."
+    },
+    "AVERAGE_SNOOZE_PER_CLINICIAN": {
+        "description": "The average snooze duration per clinician in a consultation.",
+        "data_type_format": "Integer",
+        "notes": "We only track total snooze duration, thus needing to average this out to all clinicians in consultation. We currently do not have a way of telling which clinician did the snoozing."
+    },
+    "CLINICIAN_DURATION_MINUS_SNOOZE": {
+        "description": "Duration of time of the row-specific clinician in a consultation after removing the average snooze duration per clinician.",
+        "data_type_format": "hh:mm:ss",
+        "notes": "Unique to the row. If only one clinician was in a concluded consultation then the whole snooze duration is attributed to clinician duration."
+    },
+    "CLINICIAN_DURATION_IN_SECONDS": {
+        "description": "Duration of time of the row-specific clinician in a consultation.",
+        "data_type_format": "Integer",
+        "notes": "Seconds. Unique to the row."
+    },
+    "STAFF_NAME": {
+        "description": "Name of the clinician who interacted with the patient in the consultation.",
+        "data_type_format": "Text",
+        "notes": "Unique to the row."
+    },
+    "STAFF_ROLE": {
+        "description": "The Role of the corresponding clinician.",
+        "data_type_format": "Text",
+        "notes": "e.g., doctor, nurse, clinical associate or mental health practitioner. Unique to the row."
+    },
+    "ASSIGNMENT_ORDER": {
+        "description": "The order in which the clinician saw the patient.",
+        "data_type_format": "Integer",
+        "notes": "Unique to the row. e.g. in a consultation which had both a nurse and doctor the nurse will be assigned ‘1' and the doctor '2’."
+    },
+    "STAFF_VIEWS": {
+        "description": "The total number of clinicians that were assigned to the consultations, all transfers included.",
+        "data_type_format": "Integer",
+        "notes": "e.g. in the above example there were two clinicians so a '2' is assigned."
+    },
+    "CONVERSATION_TYPE": {
+        "description": "Mode of consultation.",
+        "data_type_format": "Text",
+        "notes": "For consultations that have either voice or video calls these will include text as well since the initial contact is via text and canned messages hence “text and …” e.g. text only, text and call only, text and video etc."
+    },
+    "CLINICIAN_ROLES_IN_CONSULT": {
+        "description": "The roles of all clinicians in the consultation.",
+        "data_type_format": "Text",
+        "notes": "e.g. in the above example it would read ‘Nurse and Doctor’."
+    },
+    "CATEGORY": {
+        "description": "Symptom category tile selected at start of consultation.",
+        "data_type_format": "Text",
+        "notes": "e.g. chest, stress."
+    },
+    "RATED_AT": {
+        "description": "Timestamp for when the patient completed their rating on Kena app.",
+        "data_type_format": "Datetime",
+        "notes": None
+    },
+    "RATING": {
+        "description": "Patient's rating for the overall consultation (positive or negative).",
+        "data_type_format": "Text",
+        "notes": "The patient is prompted to rate the consultation when the consultation ends. Rating attributed to all clinicians in the conversation."
+    },
+    "KENA_USER_ID": {
+        "description": "Unique identifier for the patient within Kena users database.",
+        "data_type_format": "Varchar",
+        "notes": "e.g. 1fd5134b-7f50-423f-ae96-ec9ab03c99cd"
+    },
+    "PATIENT_GENDER": {
+        "description": "Gender of the patient.",
+        "data_type_format": "Text",
+        "notes": None
+    },
+    "PATIENT_AGE": {
+        "description": "Age of the patient at time of consultation.",
+        "data_type_format": "Int",
+        "notes": None
+    },
+    "AGE_CATEGORY": {
+        "description": "Age category the patient falls in.",
+        "data_type_format": "Text",
+        "notes": "i.e., infant, child, young adult, adult, or geriatric. Age is categorized as follows:\n\nWHEN PATIENT_AGE >= 0 AND PATIENT_AGE < 2 THEN 'Infant'\nWHEN PATIENT_AGE >= 2 AND PATIENT_AGE < 19 THEN 'Child'\nWHEN PATIENT_AGE >= 19 AND PATIENT_AGE < 40 THEN 'Young Adult'\nWHEN PATIENT_AGE >= 40 AND PATIENT_AGE < 65 THEN 'Adult'\nWHEN PATIENT_AGE >= 65 THEN 'Geriatric'"
+    },
+    "PRIMARY_ICD10_CODE": {
+        "description": "The main symptom the patient is consulting for. The first ICD10 code diagnosis the patient receives.",
+        "data_type_format": "Varchar",
+        "notes": "ICD10 Code: ICD10 Description. Data only available from 26 Oct 2023 (Kena V3 Launch). Not inclusive of other ICD10 code diagnoses done by other clinicians in the consultation."
+    },
+    "REFERRAL_LETTER": {
+        "description": "The referral letter sent to patients within the consultation.",
+        "data_type_format": "Text",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch)."
+    },
+    "REFERRAL_DOCUMENT_ISSUED": {
+        "description": "This field shows whether or not a referral document was issued by the respective clinician.",
+        "data_type_format": "Boolean (True or False)",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch)."
+    },
+    "REFERRAL_CATEGORY": {
+        "description": "The category type of the referral i.e., whether it’s an investigation emergency, etc.",
+        "data_type_format": "Text",
+        "notes": "Drop-down selection from the following choices: other_consultation, investigation, emergency. Data only available from 26 Oct 2023 (Kena V3 Launch)."
+    },
+    "REFERRAL_SECTOR": {
+        "description": "The sector to which the patient is referred to is a dropdown list of the following options: public, private, patient_choice.",
+        "data_type_format": "Text",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch)."
+    },
+    "REFERRAL_TYPE": {
+        "description": "The type of referral selected from the following choices: Radiology, Pathology, specialist, Private Hospital, allied, GP, Other.",
+        "data_type_format": "Text",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch). Please note the list is subject to change as and when the business scales its offerings."
+    },
+    "REFERRAL_SUBTYPE": {
+        "description": "These are the subtypes of the specified referral type.",
+        "data_type_format": "Text",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch). Please note the list is subject to change as and when the business scales its offerings. e.g., If specialist is the referral type then this provides the specific specialist a patient is referred to e.g., Optometrist."
+    },
+    "SICK_NOTE_DOCUMENT_ISSUED": {
+        "description": "This field shows whether or not a sick note document was issued by the respective clinician.",
+        "data_type_format": "Boolean (True or False)",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch)."
+    },
+    "SCRIPT_DOCUMENT_ISSUED": {
+        "description": "This field shows whether or not a prescription (script) note was issued by the respective clinician.",
+        "data_type_format": "Boolean (True or False)",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch)."
+    },
+    "ATTENDANCE_CERTIFICATE_DOCUMENT_ISSUED": {
+        "description": "This field shows whether or not an attendance certificate was issued to the patient by the respective clinician.",
+        "data_type_format": "Boolean (True or False)",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch)."
+    },
+    "REGISTRATION_STATUS": {
+        "description": "Indicates whether the patient completed the registration process in full.",
+        "data_type_format": "Text",
+        "notes": "Users that have not completed registration in full are allowed to do a consultation."
+    },
+    "INVOICE_ID": {
+        "description": "Identifier for the consultation's invoice.",
+        "data_type_format": "Varchar",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch). Unique to the consult. Is duplicated across rows where a consult is split across multiple clinicians. To aggregate data from this field you need to consider distinct CONSULTATION_IDs only. This comment relates to all payment-related fields. e.g., 7934ca4f-cd4b-4df0-9c9d-2475f4053abd"
+    },
+    "INVOICE_CREATED_AT": {
+        "description": "Timestamp when the invoice was generated.",
+        "data_type_format": "Timestamp_ntz (month day, year hh:mm)",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch). See comment in INVOICE_ID on payment fields. All times are South African Standard Time."
+    },
+    "AMOUNT": {
+        "description": "The total amount the consultation was invoiced for.",
+        "data_type_format": "Float",
+        "notes": "See comment in INVOICE_ID on payment fields. Data only available from 26 Oct 2023 (Kena V3 Launch). Can potentially be shown in cents e.g., for R185 will show 18500."
+    },
+    "CONSULTATION_TYPE": {
+        "description": "Type of consultation.",
+        "data_type_format": "Text",
+        "notes": "See comment in INVOICE_ID on payment fields. Data only available from 26 Oct 2023 (Kena V3 Launch). no_charge, standard, express."
+    },
+    "BILLED_CATEGORY": {
+        "description": "Whether the consultation was billed or not.",
+        "data_type_format": "Text",
+        "notes": "See comment in INVOICE_ID on payment fields. Data only available from 26 Oct 2023 (Kena V3 Launch). ”Billed” includes standard and express while “Not Billed” includes no charges and consultations that were not charged for other reasons like being canceled or not picked up by clinicians."
+    },
+    "NO_CHARGE_REASON": {
+        "description": "Drop-down selector for clinicians to indicate reason for no charge.",
+        "data_type_format": "Text",
+        "notes": "See comment in INVOICE_ID on payment fields. Data only available from 26 Oct 2023 (Kena V3 Launch). Only populates when CONSULTATION_TYPE is a no_charge."
+    },
+    "NOTE": {
+        "description": "Free text notes associated with the no charged invoice.",
+        "data_type_format": "Text",
+        "notes": "See comment in INVOICE_ID on payment fields. Data only available from 26 Oct 2023 (Kena V3 Launch). Only populates when CONSULTATION_TYPE is a no_charge."
+    },
+    "TRANSACTION_ID": {
+        "description": "Identifier for the transaction that occurred against a consultation i.e., unique key linking an invoice to the transaction settling the invoice.",
+        "data_type_format": "Varchar",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch). Unique to the invoice. Multiple transactions against an invoice will show up as distinct transaction_ids against the same invoice. e.g., b90e6567-ccdf-4e09-bbfc-a4f8db2d0c32"
+    },
+    "TRANSACTION_CREATED_AT": {
+        "description": "Timestamp when the invoice was paid and the transaction was recorded.",
+        "data_type_format": "Timestamp_ntz (month day, year hh:mm)",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch). See comment in INVOICE_ID on payment fields. All times are South African Standard Time."
+    },
+   "PAYMENT_METHOD": {
+        "description": "The method of payment used to settle the invoice.",
+        "data_type_format": "Text",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch). See comment in INVOICE_ID on payment fields. Options include voucher, Instant EFT, or cash payments. The 'Cash Payment' option refers to card payments."
+    },
+    "PAYMENT_STATUS": {
+        "description": "The status of the transaction i.e., whether the transaction failed or was a success.",
+        "data_type_format": "Text",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch)."
+    },
+    "PROMOTION_CUSTOMER_NAME": {
+        "description": "The name of the promotion customer.",
+        "data_type_format": "Text",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch). Only attached to Voucher Payment Methods."
+    },
+    "PROMOTION_NAME": {
+        "description": "The name of the promotion run by the partner.",
+        "data_type_format": "Text",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch). Only attached to Voucher Payment Methods. Examples include 'Kena Health Voucher', 'Kena Voucher April', 'Kena Health 2024'."
+    },
+    "PROMO_CODE": {
+        "description": "The promotion code provided to customers to insert at consultation payment.",
+        "data_type_format": "Text",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch). Only attached to Voucher Payment Methods. Examples include 'KenaHealthApril2024', 'KenaApril2024', 'Kena2024'."
+    },
+    "USER_ALLOCATED_VOUCHER_PROMO_CODE": {
+        "description": "The 16-digit voucher code allocated to a user for discount voucher redemption on the app.",
+        "data_type_format": "Integer",
+        "notes": None
+    },
+    "PROMOTION_ID": {
+        "description": "The unique promotion identifier.",
+        "data_type_format": "Varchar",
+        "notes": "Data only available from 26 Oct 2023 (Kena V3 Launch). Only attached to Voucher Payment Methods."
+    },
+    "CALL_IN_CONVERSATION": {
+        "description": "Boolean indicating whether a call occurred during the consultation.",
+        "data_type_format": "Boolean (True or False)",
+        "notes": "Call includes both video call and voice call."
+    },
+    "PATIENT_CANCELLED": {
+        "description": "Boolean indicating whether the patient cancelled the consultation.",
+        "data_type_format": "Boolean (True or False)",
+        "notes": None
+    },
+    "CLOSE_REASON": {
+        "description": "Reason provided for the cancellation of the consultation.",
+        "data_type_format": "Text",
+        "notes": "Only populates if PATIENT_CANCELLED is True or 1."
+    }
+}
