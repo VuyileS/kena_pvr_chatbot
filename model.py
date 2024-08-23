@@ -2,7 +2,7 @@ import streamlit as st
 import openai
 import os
 from sqlalchemy import create_engine
-from langchain.llms.openai import OpenAI
+from langchain.chat_models import ChatOpenAI
 from langchain.agents import create_sql_agent
 from langchain.sql_database import SQLDatabase
 from langchain.agents.agent_types import AgentType
@@ -32,6 +32,19 @@ if not openai_api_key:
     st.sidebar.warning("Please add your OpenAI API key to continue.")
     st.stop()
 
+# Add a dropdown to select the GPT model
+gpt_model = st.sidebar.selectbox(
+    "Choose GPT Model",
+    ["gpt-3.5-turbo", "gpt-4"]
+)
+
+# Model information in the sidebar
+st.sidebar.markdown("""
+### Model Information
+- **GPT-3.5-Turbo**: Fast and efficient, suitable for most queries with a token limit of 4096.
+- **GPT-4**: More powerful, handles complex queries better, with a token limit of 8192, but may be slower and more costly.
+""")
+
 # Establish Snowflake connection
 connection_parameters = {
     "account": os.getenv('snowflake_account'),
@@ -49,8 +62,13 @@ except Exception as e:
     st.sidebar.error(f"Login failed: {e}")
     st.stop()
 
-# Setup OpenAI LLM
-llm = OpenAI(openai_api_key=openai_api_key, temperature=0.1, streaming=True)
+# Setup ChatOpenAI LLM with the selected model
+llm = ChatOpenAI(
+    openai_api_key=openai_api_key,
+    temperature=0.1,
+    streaming=True,
+    model_name=gpt_model
+)
 
 # Setup Snowflake DB with SQLAlchemy
 snowflake_url = f"snowflake://{snowflake_username}:{snowflake_password}@{os.getenv('snowflake_account')}/{os.getenv('snowflake_database')}/{os.getenv('snowflake_schema')}?warehouse={os.getenv('snowflake_warehouse')}"
@@ -139,14 +157,19 @@ if user_query:
     Ensure accurate joins between CTEs by using common fields. If no common fields exist, prioritize the CTE with the most insights.
     When asked about queue durations and clinician durations use the QUEUE_DURATION_IN_SECONDS and CLINICIAN_DURATION_MINUS_SNOOZE respectively which are in seconds, always convert to minutes.
     """
-    
+
     modified_query = prompt_template.format(query=user_query)
 
-    with st.chat_message("assistant"):
-        st_cb = StreamlitCallbackHandler(st.container())
-        response = agent.run(modified_query, callbacks=[st_cb])
-        st.session_state.messages.append({"role": "assistant", "content": response})
-        st.write(response)
+    # Ensure the prompt and completion don't exceed the token limit
+    max_token_limit = 8192 if gpt_model == "gpt-4" else 4096
+    if len(modified_query.split()) + 256 > max_token_limit:
+        st.error("The query is too long for the selected model. Please reduce the query or context size.")
+    else:
+        with st.chat_message("assistant"):
+            st_cb = StreamlitCallbackHandler(st.container())
+            response = agent.run(modified_query, callbacks=[st_cb])
+            st.session_state.messages.append({"role": "assistant", "content": response})
+            st.write(response)
 
 # Optionally, close the session when the app exits
 if st.sidebar.button("Log out"):
