@@ -11,11 +11,37 @@ from langchain.agents.agent_toolkits import SQLDatabaseToolkit
 from snowflake.snowpark import Session
 
 # Streamlit app title
-st.set_page_config(page_title="Snowflake PVR SQL Querying with LangChain", page_icon="❄️")
-st.title("❄️ Snowflake (PVR) SQL Querying")
+st.set_page_config(page_title="Snowflake PVR SQL Querying with LangChain", page_icon="https://cdn.prod.website-files.com/62178119fe77c33f2b5d1ccc/64b908479cae7ff427f6abb6_Header%20Logo.svg")
+# Title with image
+st.markdown(
+    """
+    <h1 style="display:flex; align-items:center;">
+        <img src="https://cdn.prod.website-files.com/62178119fe77c33f2b5d1ccc/64b908479cae7ff427f6abb6_Header%20Logo.svg" width="40" style="margin-right:10px"/>
+        Snowflake (Kena PVR) SQL Querying
+    </h1>
+    """,
+    unsafe_allow_html=True
+)
+sidebar_style = """
+    <style>
+    /* Targeting the sidebar more specifically */
+    [data-testid="stSidebar"] > div:first-child {
+        background-color: #eb345e !important;
+    }
+    /* Attempting to target all text within the sidebar to change its color to white */
+    [data-testid="stSidebar"] .css-1d391kg, [data-testid="stSidebar"] .st-cb, [data-testid="stSidebar"] .st-dd, [data-testid="stSidebar"] {
+        color: #ffffff !important;
+    }
 
+    /* If the above doesn't cover all text, this broader rule might help */
+    [data-testid="stSidebar"] * {
+        color: #ffffff !important;
+    }
+    </style>
+    """
 # Sidebar login section
 st.sidebar.subheader("Login to Snowflake")
+st.markdown(sidebar_style, unsafe_allow_html=True)
 snowflake_username = st.sidebar.text_input("Snowflake Username", key="username")
 snowflake_password = st.sidebar.text_input("Snowflake Password", type="password", key="password")
 
@@ -84,6 +110,7 @@ agent = create_sql_agent(
     toolkit=toolkit,
     verbose=False,
     agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+    handle_parsing_errors=True  
 )
 
 # Simplified context from the data dictionary
@@ -149,7 +176,10 @@ if user_query:
 
     Question: {{query}}
     Instructions: 
+    Please add analytics.prod. before dim_kena__patient_visit_report when query the dim_kena__patient_visit_report table to as a schema reference.
     Look in table 'dim_kena__patient_visit_report', there are duplications in the table. Account for duplications by counting distinct records in queries that require counts. 
+    Do not use backticks or triple backticks to format SQL code.
+    Please ensure that Instead of using backticks (```) when executing and writing your queries use double quotes (").
     Identify team consultations as those involving more than one staff member.
     Consider the order of clinicians to determine consultation transfers.
     Use the 'created_at' field for date-related queries.
@@ -160,14 +190,18 @@ if user_query:
 
     modified_query = prompt_template.format(query=user_query)
 
+    # Remove backticks if they were mistakenly added
+    cleaned_query = modified_query.replace("```sql", "").replace("```", "").strip()
+
+    # Ensure the prompt and completion don't exceed the token limit
     # Ensure the prompt and completion don't exceed the token limit
     max_token_limit = 8192 if gpt_model == "gpt-4" else 4096
-    if len(modified_query.split()) + 256 > max_token_limit:
+    if len(cleaned_query.split()) + 256 > max_token_limit:
         st.error("The query is too long for the selected model. Please reduce the query or context size.")
     else:
         with st.chat_message("assistant"):
             st_cb = StreamlitCallbackHandler(st.container())
-            response = agent.run(modified_query, callbacks=[st_cb])
+            response = agent.run(cleaned_query, callbacks=[st_cb])
             st.session_state.messages.append({"role": "assistant", "content": response})
             st.write(response)
 
