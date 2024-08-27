@@ -208,7 +208,7 @@ if user_query:
     Use the 'created_at' field for date-related queries.
     Utilize multiple CTEs in your query when needed. 
     Ensure accurate joins between CTEs by using common fields. If no common fields exist, prioritize the CTE with the most insights.
-    When asked about queue durations and clinician durations use the QUEUE_DURATION_IN_SECONDS and CLINICIAN_DURATION_MINUS_SNOOZE respectively which are in seconds, always convert to minutes.
+    When asked about queue durations and clinician durations use the QUEUE_DURATION_IN_SECONDS and CLINICIAN_DURATION_IN_SECONDS respectively which are in seconds, always convert to minutes.
     """
 
     modified_query = prompt_template.format(query=user_query)
