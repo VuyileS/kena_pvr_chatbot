@@ -207,6 +207,7 @@ if user_query:
     Consider the order of clinicians to determine consultation transfers.
     Use the 'created_at' field for date-related queries.
     Utilize multiple CTEs in your query when needed. 
+    Always include the results of your queries in the final answer.
     Ensure accurate joins between CTEs by using common fields. If no common fields exist, prioritize the CTE with the most insights.
     When asked about queue durations and clinician durations use the QUEUE_DURATION_IN_SECONDS and CLINICIAN_DURATION_IN_SECONDS respectively which are in seconds, always convert to minutes.
     """
