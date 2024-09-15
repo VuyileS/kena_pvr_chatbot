@@ -9,6 +9,7 @@ from langchain.agents.agent_types import AgentType
 from langchain.callbacks import StreamlitCallbackHandler
 from langchain.agents.agent_toolkits import SQLDatabaseToolkit
 from snowflake.snowpark import Session
+import pandas as pd
 
 # Streamlit app title
 st.set_page_config(page_title="Snowflake PVR SQL Querying with LangChain", page_icon="https://cdn.prod.website-files.com/62178119fe77c33f2b5d1ccc/64b908479cae7ff427f6abb6_Header%20Logo.svg")
@@ -180,6 +181,14 @@ dim_kena__patient_visit_report contains fields such as:
 - CLOSE_REASON: Reason provided for the cancellation of the consultation.
 """
 
+# Fetch a limited preview of the table data
+query = "SELECT * FROM dim_kena__patient_visit_report LIMIT 10"
+df_limited = pd.read_sql(query, engine)
+
+# Display a preview of the data in an expander before the first message
+with st.expander("## 🔎 Please preview the patient visit report here"):
+    st.dataframe(df_limited)
+
 # Chat UI
 if "messages" not in st.session_state or st.sidebar.button("Clear message history"):
     st.session_state["messages"] = [{"role": "assistant", "content": "How can I assist you with your PVR queries today?"}]
@@ -210,6 +219,7 @@ if user_query:
     Always include the results of your queries in the final answer.
     Ensure accurate joins between CTEs by using common fields. If no common fields exist, prioritize the CTE with the most insights.
     When asked about queue durations and clinician durations use the QUEUE_DURATION_IN_SECONDS and CLINICIAN_DURATION_IN_SECONDS respectively which are in seconds, always convert to minutes.
+    When calculating averages, ensure that duplicates in the table are considered appropriately. The average should be calculated based on distinct values only.
     """
 
     modified_query = prompt_template.format(query=user_query)
