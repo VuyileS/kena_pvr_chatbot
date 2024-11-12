@@ -11,3 +11,6 @@ python-dotenv
 snowflake-snowpark-python
 streamlit
 openai
+plotly
+geopandas
+matplotlib
