@@ -2,16 +2,15 @@ import streamlit as st
 import pandas as pd
 import os
 import snowflake.connector
-import plotly.express as px
+import plotly.graph_objs as go
 from datetime import datetime
 import openai
 from openai import OpenAI
 
 def geolocation_spread(snowflake_username, snowflake_password):
-# Set up the Streamlit app
     st.title("Kena Registered Users Geolocation Spread Over Time")
 
-    # Establish your Snowflake connection
+    # Establish Snowflake connection
     conn = snowflake.connector.connect(
         user=snowflake_username,
         password=snowflake_password,
@@ -42,7 +41,7 @@ def geolocation_spread(snowflake_username, snowflake_password):
             )
             SELECT
                 U.USER_ID           AS PATIENT_ID,
-                U.CREATED_AT::DATE AS CREATED_AT,
+                U.CREATED_AT AS CREATED_AT,
                 U.OPERATING_SYSTEM, 
                 U.AGE_GROUP,
                 CASE 
@@ -60,139 +59,127 @@ def geolocation_spread(snowflake_username, snowflake_password):
             ON U.USER_ID = D.PATIENT_ID
             WHERE U.CURRENT_STEP = 99 AND U.ACCOUNT_STATUS = 1
         """
-        return pd.read_sql_query(query, con=conn)
+        return pd.read_sql_query(query, conn)
 
-    # Load data
+    # Load data and filter
     data = load_data()
-
-    # Filter for South Africa users
-    data = data[data['COUNTRY'] == 'South Africa']
-
-    # Convert to datetime and sort
+    # data = data[data['COUNTRY'] == 'South Africa']
     data['timestamp'] = pd.to_datetime(data['CREATED_AT'])
     data = data.sort_values('timestamp')
 
     # User selects date range
     col1, col2 = st.columns(2)
-
     with col1: 
         start_date = st.date_input("Select start date", min_value=data['timestamp'].min().date())
     with col2:
         end_date = st.date_input("Select end date", max_value=data['timestamp'].max().date())
-    col1, col2, col3 = st.columns(3)
+
     # Dropdown filters for Gender, Age Group, and Operating System
+    col1, col2, col3 = st.columns(3)
     with col1:
         selected_gender = st.selectbox("Select Gender", options=['All'] + data['GENDER'].unique().tolist())
     with col2:
         selected_age_group = st.selectbox("Select Age Group", options=['All'] + data['AGE_GROUP'].unique().tolist())
     with col3:
         selected_os = st.selectbox("Select Operating System", options=['All'] + data['OPERATING_SYSTEM'].unique().tolist())
-
-    # Filter data based on date range and dropdown selections
     filtered_data = data[(data['timestamp'].dt.date >= start_date) & (data['timestamp'].dt.date <= end_date)]
+    # Apply Filters button
+    if st.button("Apply Filters"):
+        # with st.expander("You Can Review The Patient Data Here"):
+        #     st.dataframe(filtered_data.sort_values(by="CREATED_AT", ascending=False))
 
-    if selected_gender != 'All':
-        filtered_data = filtered_data[filtered_data['GENDER'] == selected_gender]
+        # Filter data based on date range and dropdown selections
+        # filtered_data = data[(data['timestamp'].dt.date >= start_date) & (data['timestamp'].dt.date <= end_date)]
+        if selected_gender != 'All':
+            filtered_data = filtered_data[filtered_data['GENDER'] == selected_gender]
+        if selected_age_group != 'All':
+            filtered_data = filtered_data[filtered_data['AGE_GROUP'] == selected_age_group]
+        if selected_os != 'All':
+            filtered_data = filtered_data[filtered_data['OPERATING_SYSTEM'] == selected_os]
+        with st.expander("You Can Review The Patient Data Here"):
+            st.dataframe(filtered_data.sort_values(by="CREATED_AT", ascending=False))
 
-    if selected_age_group != 'All':
-        filtered_data = filtered_data[filtered_data['AGE_GROUP'] == selected_age_group]
+         # Display total number of unique users for the selected filters and date range
+        total_unique_users = filtered_data['PATIENT_ID'].nunique()
+        st.metric(label="Total Users for Selected Duration and Filters", value=total_unique_users)
+        # Plotting
+        if not filtered_data.empty:
+            filtered_data['animation_date'] = filtered_data['timestamp'].dt.date
+            unique_dates = sorted(filtered_data['animation_date'].unique())
+            unique_cities = filtered_data['CITY'].unique()
 
-    if selected_os != 'All':
-        filtered_data = filtered_data[filtered_data['OPERATING_SYSTEM'] == selected_os]
+            # Initialize map
+            fig = go.Figure()
+            frames = []
 
-    # Display total number of unique users for the selected filters and date range
-    total_unique_users = filtered_data['PATIENT_ID'].nunique()
-    st.metric(label="Total Users for Selected Duration and Filters", value=total_unique_users)
+            # Create traces for each city but set visibility to False initially
+            traces = {}
+            for city in unique_cities:
+                trace = go.Scattermapbox(
+                    lon=filtered_data[filtered_data['CITY'] == city]['LONGITUDE'],
+                    lat=filtered_data[filtered_data['CITY'] == city]['LATITUDE'],
+                    mode='markers',
+                    marker=dict(size=10),
+                    name=city,
+                    visible=False  # Initially hide all cities
+                )
+                fig.add_trace(trace)
+                traces[city] = trace
 
-    # Check if there is data in the filtered range
-    if filtered_data.empty:
-        st.write("No data available for the selected filters.")
-    else:
-        # Calculate cumulative user count per day
-        filtered_data['animation_date'] = filtered_data['timestamp'].dt.date
-        cumulative_data = pd.DataFrame()
+            # Create frames and control visibility of traces for each date
+            for date in unique_dates:
+                frame_data = filtered_data[filtered_data['animation_date'] <= date]
+                frame_traces = []
+                for city in unique_cities:
+                    trace = traces[city]
+                    if city in frame_data['CITY'].values:
+                        # If city has data for this frame, show it
+                        frame_traces.append(trace)
+                        trace.visible = True
+                    else:
+                        trace.visible = False  # Hide if city not present in this frame
+                frames.append(go.Frame(data=frame_traces, name=str(date)))
 
-        user_counts = []
-        for date in sorted(filtered_data['animation_date'].unique()):
-            current_data = filtered_data[filtered_data['animation_date'] <= date].copy()
-            current_data['animation_frame'] = date.strftime('%Y-%m-%d')  # Convert to string format for animation
-            
-            # Track cumulative user count
-            cumulative_user_count = len(current_data)
-            user_counts.append({'date': date, 'user_count': cumulative_user_count})
-            
-            # Set city labels only for the most recent point in each frame
-            current_data['label'] = ""
-            if not current_data.empty:
-                # Set the label for the most recent point only
-                current_data.loc[current_data.index[-1], 'label'] = current_data.loc[current_data.index[-1], 'CITY']
-            
-            cumulative_data = pd.concat([cumulative_data, current_data])
+            fig.frames = frames
 
-        # Convert user counts to DataFrame for easy lookup in annotations
-        user_counts_df = pd.DataFrame(user_counts)
-
-        # Plot with Plotly Express with cumulative animation frames
-        fig = px.scatter_mapbox(
-            cumulative_data,
-            lon='LONGITUDE',
-            lat='LATITUDE',
-            text='label',  # Use the 'label' column to display city names temporarily
-            hover_name='CITY',
-            hover_data={'REGION': True, 'timestamp': True},
-            color='CITY',
-            animation_frame="animation_frame",
-            mapbox_style="carto-positron",
-            zoom=5,
-            center={"lat": -30.5595, "lon": 22.9375}  # Center on South Africa
-        )
-        
-        # Add dynamic title with date and user count
-        fig.update_layout(
-            title={
-                'text': '.',
-                'x': 0.5,
-                'xanchor': 'center',
-                'yanchor': 'top'
-            },
-            margin={"r":0,"t":40,"l":0,"b":0},
-            updatemenus=[{
-                "type": "buttons",
-                "showactive": False,
-                "buttons": [{
-                    "label": "Play",
-                    "method": "animate",
-                    "args": [None, {"frame": {"duration": 2000, "redraw": True}, "fromcurrent": True}]
-                }, {
-                    "label": "Pause",
-                    "method": "animate",
-                    "args": [[None], {"frame": {"duration": 0, "redraw": True}, "mode": "immediate", "transition": {"duration": 0}}]
-                }]
-            }]
-        )
-
-        # Update annotations to display total users and date for each frame
-        frames = fig.frames
-        for frame in frames:
-            frame_date = frame.name  # The date for this frame in 'YYYY-MM-DD' format
-            user_count = user_counts_df.loc[user_counts_df['date'] == pd.to_datetime(frame_date).date(), 'user_count'].values[0]
-            frame.layout.update(
-                annotations=[
-                    dict(
-                        x=0.5,
-                        y=1.1,
-                        xref='paper',
-                        yref='paper',
-                        showarrow=False,
-                        text=f"Date: {frame_date} | Total Users: {user_count}",
-                        font=dict(size=16, color="black")
-                    )
-                ]
+            # Set up initial map layout with progress bar
+            fig.update_layout(
+                mapbox=dict(
+                    style="carto-positron",
+                    center=dict(lat=-30.5595, lon=22.9375),  # Center on South Africa
+                    zoom=4,
+                ),
+                updatemenus=[{
+                    "type": "buttons",
+                    "showactive": True,  # Display progress bar
+                    "direction": "left",  # Arrange buttons horizontally
+                    # "x": 0.5,  # Center the buttons horizontally
+                    # "y": -0.2,  # Position the buttons below the graph
+                    "xanchor": "center",
+                    "yanchor": "top",
+                    "buttons": [{
+                        "label": "Play",
+                        "method": "animate",
+                        "args": [None, {"frame": {"duration": 2000, "redraw": True}, "fromcurrent": True, "mode": "immediate"}]
+                    }, {
+                        "label": "Pause",
+                        "method": "animate",
+                        "args": [[None], {"frame": {"duration": 0, "redraw": True}, "mode": "immediate", "transition": {"duration": 0}}]
+                    }]
+                }],
+                title_text="Geolocation Spread Over Time",
+                showlegend=True
             )
 
-        # Display map plot with the animated title
-        st.plotly_chart(fig)
+            fig.update_layout(
+                legend_title_text="City",
+                legend=dict(
+                    itemsizing="constant",
+                    title_font=dict(size=12),
+                )
+            )
 
+            st.plotly_chart(fig)
     if st.button("Generate User Profile with GPT"):
         # Calculate the most common values in the filtered data
         most_common_gender = filtered_data['GENDER'].mode()[0]
