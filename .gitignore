@@ -5,3 +5,14 @@
 .env
 .DS_Store
 questions.txt
+ip_addresses.csv
+ip_location_data_historical.csv
+ip_location_data_with_patient_ids.csv
+ip_location_data_with_patient_ids.xls
+ip_location_data.csv
+rfm.py
+test2.py
+test3.py
+/data
+__pycache__/
+*.pyc
