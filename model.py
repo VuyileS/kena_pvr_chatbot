@@ -13,9 +13,10 @@ import pandas as pd
 
 from registrations_geolocation import geolocation_spread
 from patient_analysis import patient_messaging
+from clinic_registrations_geolocation import clinic_geolocation_spread
 
 st.set_page_config(page_title="Snowflake PVR SQL Querying with LangChain", page_icon="https://cdn.prod.website-files.com/62178119fe77c33f2b5d1ccc/64b908479cae7ff427f6abb6_Header%20Logo.svg")
-tab1, tab2, tab3 = st.tabs(["SQL Querying", "Geolocation Spread", "Support Messaging"])
+tab1, tab2, tab3 = st.tabs(["SQL Querying", "Geolocation Spread", "Support Messaging"])#, , tab4 "Clinic Medical Centre"
 
 with tab1:
     # Streamlit app title
@@ -259,3 +260,9 @@ with tab2:
 
 with tab3:
     patient_messaging(snowflake_username,snowflake_password )
+
+# with tab4:
+#     clinic_geolocation_spread(snowflake_username,snowflake_password )
+
+# with tab5:
+#     pre_consult(snowflake_username,snowflake_password )

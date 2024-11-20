@@ -6,6 +6,7 @@ import plotly.graph_objs as go
 from datetime import datetime
 import openai
 from openai import OpenAI
+import math
 
 def geolocation_spread(snowflake_username, snowflake_password):
     st.title("Kena Registered Users Geolocation Spread Over Time")
@@ -247,49 +248,145 @@ LEFT JOIN PAYMENTS P
         )
 
         st.plotly_chart(fig)
-
-    # Generate User Profile with GPT
+    
+    def haversine(lat1, lon1, lat2, lon2):
+        R = 6371  # Earth radius in km
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
+        a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return R * c
+        # Dropdown for selecting a patient
     if st.session_state['filters_applied'] and st.session_state['filtered_data'] is not None:
-        if st.button("Generate User Profile with GPT"):
-            filtered_data = st.session_state['filtered_data']
-            most_common_gender = filtered_data['GENDER'].mode()[0]
-            most_common_age_group = filtered_data['AGE_GROUP'].mode()[0]
-            most_common_os = filtered_data['OPERATING_SYSTEM'].mode()[0]
-            most_common_city = filtered_data['CITY'].mode()[0]
-            most_icd10_code = filtered_data['LAST_CONSULT_PRIMARY_ICD10_CODE'].mode()[0]
-            start_date, end_date = filtered_data['timestamp'].dt.date.min(), filtered_data['timestamp'].dt.date.max()
-
-            prompt = f"""
-            Using the following common attributes from the dataset, construct a short (less than 13 lines) typical user profile.
-
-            - Gender: {most_common_gender}
-            - Age Group: {most_common_age_group}
-            - Operating System: {most_common_os}
-            - City: {most_common_city}
-            - Most Common ICD10 Code: {most_icd10_code}
-            - Data Date Range: {start_date} to {end_date}
-
-            Describe this typical user, considering possible behaviors, preferences, and lifestyle characteristics that align with someone of this demographic profile. Include details about how they might interact with a telemedicine app called Kena app, reasons they might use it, and any notable characteristics. Based on the date range provided, identify any seasonal factors that may influence the use of the app or common health concerns during this period.
+        filtered_data = st.session_state['filtered_data']
+        patient_ids = filtered_data['PATIENT_ID'].unique()
+        selected_patient_id = st.selectbox("Select a Patient", options=patient_ids)
+        def generate_personalized_message(patient_id, gender, nearby_users_count, top_icd10_code, age_group_summary, city_name):
             """
-
+            Generate a personalized message using LLM based on the user's proximity data.
+            """
+            prompt = f"""
+            Write a short message (less than 10 lines, one paragraph) addressed to a user thanking them for their interest in using Kena. They have just registered to Kena Health. 
+            The message should summarize the top health conditions and age demographics for people of their gender within 100km of their location.
+            Include the following details in a friendly tone. Include age appropriate emojis and don't go overboard with them. For the top health condition, please give a description and then give an explanation on what it is. Also you can provide the user with the following link https://icd.who.int/browse10/2019/en for them to search for the desriptions of the icd10 code. Tell them to just copy the code and search for it on the link.
+            This should tell them more about the diagnoses in their area. Mention the following in your message "we have some health data trends that might interest you". 
+            If you mention a link, format it using Markdown so that the text is hyperlinked. 
+            If for any field there is no data available then do not speak about that factor, particularly icd10 code data if there's no data available then don't even bother putting the link to the user.:
+            
+            - Gender: {gender}
+            - Nearby Users Count: {nearby_users_count}
+            - Top Health Condition (ICD10): {top_icd10_code}
+            - Most Common Age Group: {age_group_summary}
+            """
+            # - Patient ID: {patient_id}
+            # Call OpenAI API to generate the response
             client = OpenAI()
             response = client.chat.completions.create(
                 model="gpt-4",
-                messages=[{"role": "system", "content": "You are an assistant that creates user profiles based on data patterns."}, {"role": "user", "content": prompt}]
+                messages=[{"role": "system", "content": "You are an assistant that registered users meet first after registration to the Kena Health app and you are basing this on data patterns."}, 
+                          {"role": "user", "content": prompt}]
             )
+            
+            return response.choices[0].message.content
 
-            profile_description = response.choices[0].message.content
+        if selected_patient_id:
+            # Get the selected user's coordinates and gender
+            selected_user = filtered_data[filtered_data['PATIENT_ID'] == selected_patient_id].iloc[0]
+            user_lat, user_lon = selected_user['LATITUDE'], selected_user['LONGITUDE']
+            user_gender = selected_user['GENDER']
+            user_city = selected_user['CITY']
 
+            # Filter users within a 100km radius
+            filtered_data['distance_km'] = filtered_data.apply(
+                lambda row: haversine(user_lat, user_lon, row['LATITUDE'], row['LONGITUDE']), axis=1
+            )
+            
+            nearby_users = filtered_data[(filtered_data['distance_km'] <= 100) & (filtered_data['GENDER'] == user_gender)]
+
+            # Summarize age group and top ICD10 code for nearby users
+            # age_group_summary = nearby_users['AGE_GROUP'].value_counts().idxmax() if not nearby_users.empty else "N/A"
+            if not nearby_users.empty and not nearby_users['AGE_GROUP'].dropna().empty:
+                age_group_summary = nearby_users['AGE_GROUP'].value_counts().idxmax()
+            else:
+                age_group_summary = "No data available"
+            # top_icd10_code = nearby_users['LAST_CONSULT_PRIMARY_ICD10_CODE'].value_counts().idxmax() if not nearby_users.empty else "N/A"
+            if not nearby_users.empty and not nearby_users['LAST_CONSULT_PRIMARY_ICD10_CODE'].dropna().empty:
+                top_icd10_code = nearby_users['LAST_CONSULT_PRIMARY_ICD10_CODE'].value_counts().idxmax()
+            else:
+                top_icd10_code = "No data available"
+            # Display summary
             st.markdown(f"""
-                    <p><strong>👤 Gender:</strong> {most_common_gender}</p>
-                    <p><strong>🎂 Age Group:</strong> {most_common_age_group}</p>
-                    <p><strong>💻 Operating System:</strong> {most_common_os}</p>
-                    <p><strong>📍 City:</strong> {most_common_city}</p>
-                    <p><strong>👨‍🔬 Most Common ICD10 Code:</strong> {most_icd10_code}</p>
-            """, unsafe_allow_html=True)
-            st.markdown(f"""
-                <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.1); font-family: Arial, sans-serif;">
-                    <h2 style="color: #4e5c6e;">Typical User Profile</h2>
-                    <p>{profile_description}</p>
+                <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.1);">
+                    <h2 style="color: #4e5c6e;">Activity Summary for {user_gender} Users Near {selected_patient_id}</h2>
+                    <p><strong>🏠 Selected Patient:</strong> {selected_patient_id}</p>
+                    <p><strong>🌍 Location:</strong> {user_city}</p>
+                    <p><strong>📍 Proximity (100km):</strong> {len(nearby_users)} users</p>
+                    <p><strong>📊 Most Common Age Group:</strong> {age_group_summary}</p>
+                    <p><strong>🩺 Top ICD10 Code:</strong> {top_icd10_code}</p>
                 </div>
             """, unsafe_allow_html=True)
+
+            # Generate personalized message using LLM
+        if st.button("Generate Personalized Message"):
+            personalized_message = generate_personalized_message(
+                patient_id=selected_patient_id,
+                gender=user_gender,
+                nearby_users_count=len(nearby_users),
+                top_icd10_code=top_icd10_code,
+                age_group_summary=age_group_summary, 
+                city_name=user_city
+            )
+
+            st.markdown(f"""
+                <div style="background-color: #e8f5e9; padding: 20px; border-radius: 10px; box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.1);">
+                    <h3 style="color: #4caf50;">Message for Patient {selected_patient_id}</h3>
+                    <p>{personalized_message}</p>
+                </div>
+            """, unsafe_allow_html=True)
+
+    # Generate User Profile with GPT
+    # if st.session_state['filters_applied'] and st.session_state['filtered_data'] is not None:
+    #     if st.button("Generate User Profile with GPT"):
+    #         filtered_data = st.session_state['filtered_data']
+    #         most_common_gender = filtered_data['GENDER'].mode()[0]
+    #         most_common_age_group = filtered_data['AGE_GROUP'].mode()[0]
+    #         most_common_os = filtered_data['OPERATING_SYSTEM'].mode()[0]
+    #         most_common_city = filtered_data['CITY'].mode()[0]
+    #         most_icd10_code = filtered_data['LAST_CONSULT_PRIMARY_ICD10_CODE'].mode()[0]
+    #         start_date, end_date = filtered_data['timestamp'].dt.date.min(), filtered_data['timestamp'].dt.date.max()
+
+    #         prompt = f"""
+    #         Using the following common attributes from the dataset, construct a short (less than 13 lines) typical user profile.
+
+    #         - Gender: {most_common_gender}
+    #         - Age Group: {most_common_age_group}
+    #         - Operating System: {most_common_os}
+    #         - City: {most_common_city}
+    #         - Most Common ICD10 Code: {most_icd10_code}
+    #         - Data Date Range: {start_date} to {end_date}
+
+    #         Describe this typical user, considering possible behaviors, preferences, and lifestyle characteristics that align with someone of this demographic profile. Include details about how they might interact with a telemedicine app called Kena app, reasons they might use it, and any notable characteristics. Based on the date range provided, identify any seasonal factors that may influence the use of the app or common health concerns during this period.
+    #         """
+
+    #         client = OpenAI()
+    #         response = client.chat.completions.create(
+    #             model="gpt-4",
+    #             messages=[{"role": "system", "content": "You are an assistant that creates user profiles based on data patterns."}, {"role": "user", "content": prompt}]
+    #         )
+
+    #         profile_description = response.choices[0].message.content
+
+    #         st.markdown(f"""
+    #                 <p><strong>👤 Gender:</strong> {most_common_gender}</p>
+    #                 <p><strong>🎂 Age Group:</strong> {most_common_age_group}</p>
+    #                 <p><strong>💻 Operating System:</strong> {most_common_os}</p>
+    #                 <p><strong>📍 City:</strong> {most_common_city}</p>
+    #                 <p><strong>👨‍🔬 Most Common ICD10 Code:</strong> {most_icd10_code}</p>
+    #         """, unsafe_allow_html=True)
+    #         st.markdown(f"""
+    #             <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.1); font-family: Arial, sans-serif;">
+    #                 <h2 style="color: #4e5c6e;">Typical User Profile</h2>
+    #                 <p>{profile_description}</p>
+    #             </div>
+    #         """, unsafe_allow_html=True)

@@ -44,7 +44,23 @@ def patient_messaging(snowflake_username, snowflake_password ):
         ORDER BY CC.CREATED_AT DESC
         """
         return pd.read_sql_query(query, conn)
+    @st.cache_data
+    def load_ratings_data():
+        query = """
+        SELECT
+            PATIENT_ID,
+            CONVERSATION_ID,
+            CREATED_AT,
+            RATING,
+            COMMENT
+        FROM RAW.CLINIC_PUBLIC.CLIENT_CLINIC_CONVERSATION_RATINGS
+        ORDER BY PATIENT_ID ASC, CREATED_AT ASC
+        """
+        return pd.read_sql_query(query, conn)
 
+    # Load data
+    # consultation_data = load_data()
+    ratings_data = load_ratings_data()
     # Function to generate a support message from GPT
     def generate_support_message(patient_json):
         client = OpenAI()
@@ -104,3 +120,57 @@ def patient_messaging(snowflake_username, snowflake_password ):
             support_message = generate_support_message(patient_json)
             st.subheader("Support Message")
             st.write(support_message)
+
+        # st.title("Consultation History Overview")
+        # st.write("Explore consultation history for patients with 2 or more consultations.")
+
+        # # Filter ratings data to include only patients with 2 or more consultations
+        # patient_consult_counts = ratings_data['PATIENT_ID'].value_counts()
+        # eligible_patients = patient_consult_counts[patient_consult_counts >= 2].index
+        # filtered_ratings_data = ratings_data[ratings_data['PATIENT_ID'].isin(eligible_patients)]
+
+        # # Patient selection
+        # overview_patient_ids = filtered_ratings_data['PATIENT_ID'].unique().tolist()
+        # selected_overview_patient_id = st.selectbox("Select a Patient ID for History Overview", options=overview_patient_ids)
+
+        # if selected_overview_patient_id:
+        #     # Filter data for the selected patient
+        #     patient_history = filtered_ratings_data[filtered_ratings_data['PATIENT_ID'] == selected_overview_patient_id]
+        #     avg_rating = patient_history['RATING'].mean()
+        #     combined_comments = " ".join(patient_history['COMMENT'].dropna().tolist())
+        #     num_consultations = len(patient_history)
+        #     consultation_dates = patient_history['CREATED_AT'].sort_values()
+        #     time_between_consults = consultation_dates.diff().dt.days.dropna().tolist()
+        #     days_since_last_consult = (pd.Timestamp.now() - consultation_dates.max()).days
+
+        #     # Create Summary JSON
+        #     history_summary = {
+        #         "patient_id": selected_overview_patient_id,
+        #         "average_rating": round(avg_rating, 2),
+        #         # "combined_comments": combined_comments,
+        #         "number_of_consultations": num_consultations,
+        #         "time_between_consultations": time_between_consults,
+        #         "days_since_last_consultation": days_since_last_consult,
+        #         "ratings": patient_history[['RATING', 'COMMENT', 'CREATED_AT']].to_dict(orient="records")
+        #     }
+
+        #     # Display JSON Summary
+        #     with st.expander("See Patient History Summary JSON"):
+        #         st.json(history_summary)
+
+        #     # Generate LLM Overview
+        #     if st.button("Generate History Overview"):
+        #         client = OpenAI()
+        #         prompt = f"Using the following data: {history_summary}. Please summarize the user's average rating and craft a welcoming message reflecting on their consultation history. Highlight what they enjoyed about specific consultations on certain dates and acknowledge any negative experiences with empathy, ensuring the tone is warm and inviting. Mention how long it has been since their last visit to create a sense of connection. Keep the response concise (under 10 lines or one paragraph), engaging, and direct. Use emojis sparingly to add warmth without being overly extravagant."
+        #         openai.api_key = os.getenv("OPENAI_API_KEY")
+
+        #         response = client.chat.completions.create(
+        #             model="gpt-4",
+        #             messages=[
+        #                 {"role": "system", "content": "You are a professional assistant to the Kena Health app welcoming patients. Don't mention words like average rating but do refer to it in an engaging manner. Also the patients do not have scheduled consultations, however we want to ensure that they feel a personal touch of their historic consultations. Your tone and words should lead the patient to actually consulting again. Do not include a sign off on the message "},
+        #                 {"role": "user", "content": prompt}
+        #             ]
+        #         )
+        #         overview_message = response.choices[0].message.content
+        #         st.subheader("Consultation History Overview")
+        #         st.write(overview_message)
