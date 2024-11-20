@@ -10,6 +10,7 @@ from langchain.callbacks import StreamlitCallbackHandler
 from langchain.agents.agent_toolkits import SQLDatabaseToolkit
 from snowflake.snowpark import Session
 import pandas as pd
+from typing import Optional
 
 from registrations_geolocation import geolocation_spread
 from patient_analysis import patient_messaging
@@ -111,10 +112,15 @@ with tab1:
     db = SQLDatabase(engine, include_tables=["dim_kena__patient_visit_report"])
 
     # Define BaseCache and rebuild the model
-    SQLDatabaseToolkit.BaseCache = None  # Use an appropriate cache if necessary
+    # Define a dummy BaseCache or use an appropriate implementation
+    class BaseCache:
+        pass
+
+    # Assign and rebuild
+    SQLDatabaseToolkit.BaseCache = Optional[BaseCache]  # Use Optional to allow None
     SQLDatabaseToolkit.model_rebuild()
 
-    
+
     # Create a toolkit for the SQL agent
     toolkit = SQLDatabaseToolkit(db=db, llm=llm)
 
