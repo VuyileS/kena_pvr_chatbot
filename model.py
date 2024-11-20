@@ -110,6 +110,11 @@ with tab1:
     engine = create_engine(snowflake_url)
     db = SQLDatabase(engine, include_tables=["dim_kena__patient_visit_report"])
 
+    # Define BaseCache and rebuild the model
+    SQLDatabaseToolkit.BaseCache = None  # Use an appropriate cache if necessary
+    SQLDatabaseToolkit.model_rebuild()
+
+    
     # Create a toolkit for the SQL agent
     toolkit = SQLDatabaseToolkit(db=db, llm=llm)
 
