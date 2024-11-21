@@ -161,3 +161,4 @@ websocket-client==1.8.0
 wrapt==1.16.0
 yarl==1.17.2
 zipp==3.21.0
+langchain_experimental
