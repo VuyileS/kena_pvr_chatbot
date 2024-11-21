@@ -3,14 +3,24 @@ import openai
 import os
 from sqlalchemy import create_engine
 from langchain.chat_models import ChatOpenAI
-from langchain.agents import create_sql_agent
+# from langchain.agents import create_sql_agent
 from langchain.sql_database import SQLDatabase
 from langchain.agents.agent_types import AgentType
 from langchain.callbacks import StreamlitCallbackHandler
-from langchain.agents.agent_toolkits import SQLDatabaseToolkit
+# from langchain.agents.agent_toolkits import SQLDatabaseToolkit
+# from langchain.tools.sql_database.tool import QuerySQLDataBaseTool
+from langchain.callbacks.base import BaseCallbackHandler
 from snowflake.snowpark import Session
 import pandas as pd
-from typing import Optional
+from langchain.agents import initialize_agent, Tool
+from langchain.agents.agent_types import AgentType
+# from langchain.tools.sql_database.tool import QuerySQLDataBaseTool
+from langchain.sql_database import SQLDatabase
+from pydantic import BaseModel
+from langchain_experimental.sql import SQLDatabaseChain
+from langchain.sql_database import SQLDatabase
+from pydantic import BaseModel
+
 
 from registrations_geolocation import geolocation_spread
 from patient_analysis import patient_messaging
@@ -98,41 +108,6 @@ with tab1:
         st.sidebar.error(f"Login failed: {e}")
         st.stop()
 
-    # Setup ChatOpenAI LLM with the selected model
-    llm = ChatOpenAI(
-        openai_api_key=openai_api_key,
-        temperature=0.1,
-        streaming=True,
-        model_name=gpt_model
-    )
-
-    # Setup Snowflake DB with SQLAlchemy
-    snowflake_url = f"snowflake://{snowflake_username}:{snowflake_password}@{os.getenv('snowflake_account')}/{os.getenv('snowflake_database')}/{os.getenv('snowflake_schema')}?warehouse={os.getenv('snowflake_warehouse')}"
-    engine = create_engine(snowflake_url)
-    db = SQLDatabase(engine, include_tables=["dim_kena__patient_visit_report"])
-
-    # Define BaseCache and rebuild the model
-    # Define a dummy BaseCache or use an appropriate implementation
-    class BaseCache:
-        pass
-
-    # Assign and rebuild
-    SQLDatabaseToolkit.BaseCache = Optional[BaseCache]  # Use Optional to allow None
-    SQLDatabaseToolkit.model_rebuild()
-
-
-    # Create a toolkit for the SQL agent
-    toolkit = SQLDatabaseToolkit(db=db, llm=llm)
-
-    # Create SQL agent with verbose output and callback handling
-    agent = create_sql_agent(
-        llm=llm,
-        toolkit=toolkit,
-        verbose=False,
-        agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-        handle_parsing_errors=True  
-    )
-
     # Simplified context from the data dictionary
     context_str = """
     dim_kena__patient_visit_report contains fields such as:
@@ -199,6 +174,72 @@ with tab1:
     - PATIENT_CANCELLED: Whether the patient canceled the consultation.
     - CLOSE_REASON: Reason provided for the cancellation of the consultation.
     """
+    
+    llm_prompt_template = """
+    Using the following context into the dim_kena__patient_visit_report table, answer prompts in a contextual manner: {context_str}
+
+        Question: {{query}}
+        Instructions: 
+        Please add analytics.prod. before dim_kena__patient_visit_report when query the dim_kena__patient_visit_report table to as a schema reference.
+        Look in table 'dim_kena__patient_visit_report', there are duplications in the table. Account for duplications by counting distinct records in queries that require counts. 
+        Given an input question, create a syntactically correct Snowflake SQL query.
+            - Use only double quotes (`"`) if necessary for table or column names.
+            - Do not use backticks (` ``` `).
+        Do not use backticks or triple backticks to format SQL code or column names.
+        Please ensure that Instead of using backticks (```) when executing and writing your queries use double quotes (") because this throws an error when querying in snowflake.
+        Identify team consultations as those involving more than one staff member.
+        Consider the order of clinicians to determine consultation transfers.
+        Use the 'created_at' field for date-related queries.
+        Utilize multiple CTEs in your query when needed. 
+        Always include the results of your queries in the final answer.
+        Ensure accurate joins between CTEs by using common fields. If no common fields exist, prioritize the CTE with the most insights.
+        When asked about queue durations and clinician durations use the QUEUE_DURATION_IN_SECONDS and CLINICIAN_DURATION_IN_SECONDS respectively which are in seconds, always convert to minutes.
+        When calculating averages, ensure that duplicates in the table are considered appropriately. The average should be calculated based on distinct values only.
+        When the results are too long you can write the final answer as a table. 
+        
+    """
+    # Setup ChatOpenAI LLM with the selected model
+    llm = ChatOpenAI(
+        openai_api_key=openai_api_key,
+        temperature=0.1,
+        streaming=True,
+        prompt_template=llm_prompt_template,
+        model_name=gpt_model
+    )
+    class BaseCache(BaseModel):
+        pass
+
+    SQLDatabaseChain.BaseCache = BaseCache
+
+    # Define Callbacks and rebuild SQLDatabaseChain
+    class Callbacks(BaseCallbackHandler):
+        """Define any necessary logic for callbacks."""
+        pass
+
+    SQLDatabaseChain.Callbacks = Callbacks
+    SQLDatabaseChain.model_rebuild()
+    # Setup Snowflake DB with SQLAlchemy
+    snowflake_url = f"snowflake://{snowflake_username}:{snowflake_password}@{os.getenv('snowflake_account')}/{os.getenv('snowflake_database')}/{os.getenv('snowflake_schema')}?warehouse={os.getenv('snowflake_warehouse')}"
+    engine = create_engine(snowflake_url)
+    db = SQLDatabase(engine, include_tables=["dim_kena__patient_visit_report"])
+
+    
+    
+    # Initialize ChatOpenAI LLM
+    llm = ChatOpenAI(
+        openai_api_key=openai_api_key,
+        temperature=0.1,
+        model_name=gpt_model
+    )
+  
+    # Set up a Streamlit callback handler
+    st_cb = StreamlitCallbackHandler(st.container())
+    # Create the SQLDatabaseChain
+    # sql_chain = SQLDatabaseChain.from_llm(llm, db, verbose=True, callbacks=[st_cb])
+    sql_chain = SQLDatabaseChain.from_llm(llm, db, verbose=True)
+
+
+    
 
     # Fetch a limited preview of the table data
     query = "SELECT * FROM dim_kena__patient_visit_report LIMIT 10"
@@ -207,6 +248,56 @@ with tab1:
     # Display a preview of the data in an expander before the first message
     with st.expander("## 🔎 Please preview the patient visit report here"):
         st.dataframe(df_limited)
+    
+    class CustomStreamlitCallbackHandler(BaseCallbackHandler):
+        """Custom callback handler to display meaningful intermediate outputs in the Streamlit app."""
+
+        def __init__(self):
+            self.steps = []  # Store steps as a list of tuples (title, content)
+
+        def on_text(self, text: str, **kwargs):
+            """Process intermediate outputs dynamically and filter out irrelevant information."""
+
+            # Skip verbose instructions or table schema information
+            if "CREATE TABLE" in text or "Question" in text:
+                return  # Ignore verbose content containing schema or context
+            
+            if "SQLQuery:" in text:
+                sql_query = text.split("SQLQuery:", 1)[-1].strip()
+                # sanitized_query = sql_query.replace("`", "").strip()  # Remove backticks
+                sanitized_query = (
+                    sql_query.replace("`", "")  # Remove backticks
+                    .replace("```", "")         # Remove triple backticks
+                    .strip()                    # Trim whitespace
+                )
+                if sanitized_query:
+                    self.steps.append(("Generated SQL Query", f"```sql\n{sanitized_query}\n```"))
+
+                    try:
+                        # Execute the sanitized query
+                        result = db.run(sanitized_query)
+                        self.steps.append(("SQL Query Result", f"```plaintext\n{result}\n```"))
+                    except Exception as e:
+                        error_message = f"Error executing query: {str(e)}"
+                        self.steps.append(("SQL Execution Error", f"```plaintext\n{error_message}\n```"))
+            elif "SQLResult:" in text:
+                sql_result = text.split("SQLResult:", 1)[-1].strip()
+                if sql_result:
+                    self.steps.append(("SQL Query Result", f"```plaintext\n{sql_result}\n```"))
+            elif "Answer:" in text:
+                answer = text.split("Answer:", 1)[-1].strip()
+                if answer:
+                    self.steps.append(("Final Answer", f"```plaintext\n{answer}\n```"))
+            else:
+                if text.strip():
+                    self.steps.append(("Intermediate Step", f"```plaintext\n{text.strip()}\n```"))
+
+        def get_steps(self):
+            """Return all grouped steps."""
+            return self.steps
+
+
+
 
     # Chat UI
     if "messages" not in st.session_state or st.sidebar.button("Clear message history"):
@@ -221,42 +312,55 @@ with tab1:
         st.session_state.messages.append({"role": "user", "content": user_query})
         st.chat_message("user").write(user_query)
 
-        # Create the full prompt with context
-        prompt_template = f"""
-        Using the following context into the dim_kena__patient_visit_report table, answer prompts in a contextual manner: {context_str}
+        assistant_message = st.chat_message("assistant")
+        response = None  # Ensure response is defined
+        with assistant_message:
+            with st.spinner("Processing your query..."):
+                try:
+                    # Initialize the custom callback handler
+                    custom_st_cb = CustomStreamlitCallbackHandler()
 
-        Question: {{query}}
-        Instructions: 
-        Please add analytics.prod. before dim_kena__patient_visit_report when query the dim_kena__patient_visit_report table to as a schema reference.
-        Look in table 'dim_kena__patient_visit_report', there are duplications in the table. Account for duplications by counting distinct records in queries that require counts. 
-        Do not use backticks or triple backticks to format SQL code.
-        Please ensure that Instead of using backticks (```) when executing and writing your queries use double quotes (").
-        Identify team consultations as those involving more than one staff member.
-        Consider the order of clinicians to determine consultation transfers.
-        Use the 'created_at' field for date-related queries.
-        Utilize multiple CTEs in your query when needed. 
-        Always include the results of your queries in the final answer.
-        Ensure accurate joins between CTEs by using common fields. If no common fields exist, prioritize the CTE with the most insights.
-        When asked about queue durations and clinician durations use the QUEUE_DURATION_IN_SECONDS and CLINICIAN_DURATION_IN_SECONDS respectively which are in seconds, always convert to minutes.
-        When calculating averages, ensure that duplicates in the table are considered appropriately. The average should be calculated based on distinct values only.
-        """
+                    # Combine the context and user query
+                    full_input = f"{llm_prompt_template}\n\nQuestion: {user_query}"
 
-        modified_query = prompt_template.format(query=user_query)
+                    # Run the SQL chain
+                    response = sql_chain.run(full_input, callbacks=[custom_st_cb])
 
-        # Remove backticks if they were mistakenly added
-        cleaned_query = modified_query.replace("```sql", "").replace("```", "").strip()
+                    # Ensure backticks are removed from any generated queries
+                    for step_title, step_content in custom_st_cb.get_steps():
+                        if "Generated SQL Query" in step_title:
+                            sql_query = step_content.strip("```sql").strip()
+                            sanitized_query = sql_query.replace("`", "").strip()
+                            
+                            # Execute the sanitized query
+                            try:
+                                result = db.run(sanitized_query)
+                                custom_st_cb.steps.append(
+                                    ("Sanitized SQL Query Result", f"```plaintext\n{result}\n```")
+                                )
+                            except Exception as e:
+                                custom_st_cb.steps.append(
+                                    ("SQL Execution Error", f"```plaintext\n{e}\n```")
+                                )
 
-        # Ensure the prompt and completion don't exceed the token limit
-        # Ensure the prompt and completion don't exceed the token limit
-        max_token_limit = 8192 if gpt_model == "gpt-4" else 4096
-        if len(cleaned_query.split()) + 256 > max_token_limit:
-            st.error("The query is too long for the selected model. Please reduce the query or context size.")
-        else:
-            with st.chat_message("assistant"):
-                st_cb = StreamlitCallbackHandler(st.container())
-                response = agent.run(cleaned_query, callbacks=[st_cb])
-                st.session_state.messages.append({"role": "assistant", "content": response})
-                st.write(response)
+                    # Display intermediate steps
+                    for step_title, step_content in custom_st_cb.get_steps():
+                        with st.expander(f"🔍 {step_title}", expanded=False):
+                            st.markdown(step_content, unsafe_allow_html=True)
+
+                except Exception as e:
+                    st.error(f"An error occurred: {e}")
+                    response = f"An error occurred: {e}"  # Provide a fallback response
+
+        # Append the final response to session state and display it
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        assistant_message.write(response)
+
+
+
+
+
+
 
     # Optionally, close the session when the app exits
     if st.sidebar.button("Log out"):
