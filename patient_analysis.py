@@ -21,6 +21,19 @@ def patient_messaging(snowflake_username, snowflake_password ):
     @st.cache_data
     def load_data():
         query = """
+        WITH DATA AS (
+        SELECT
+            CONVERSATION_ID,
+            CONSULTATION_ID,
+            PATIENT_ID,
+            CREATED_AT,
+            CATEGORY,
+            STAFF_NAME, 
+            STAFF_ID,
+            VIDEOMED_CALL_TYPE,
+            DENSE_RANK() OVER(PARTITION BY PATIENT_ID ORDER BY CREATED_AT DESC) AS NUMBER_CONSULTS
+            FROM ANALYTICS.PROD.DIM_KENA__CLIENT_CONVERSATIONS
+        )
         SELECT DISTINCT
             CC.CONVERSATION_ID,
             CC.CONSULTATION_ID,
@@ -30,9 +43,10 @@ def patient_messaging(snowflake_username, snowflake_password ):
             CC.CATEGORY,
             LB.RESPONSES,
             CC.STAFF_NAME,
+            CONCAT_WS(' ', U.FIRST_NAME, U.LAST_NAME)           AS PATIENT_NAME,
             CC.VIDEOMED_CALL_TYPE,
             CCN.DATA
-        FROM ANALYTICS.PROD.DIM_KENA__CLIENT_CONVERSATIONS CC
+        FROM DATA CC
         LEFT JOIN ANALYTICS.PROD.STG_KENA__CLIENT_CLINIC_LINDA_BOTS LB
             ON CC.CONVERSATION_ID = LB.CONVERSATION_ID
         LEFT JOIN RAW.CLINIC_PUBLIC.CONSULTATION_CLINICAL_NOTES CCN
@@ -40,7 +54,7 @@ def patient_messaging(snowflake_username, snowflake_password ):
             AND CC.STAFF_ID = CCN.USER_ID
         LEFT JOIN ANALYTICS.PROD.STG_KENA_CLINIC__USERS     U 
             ON CC.PATIENT_ID = U.USER_ID
-        WHERE CC.VIDEOMED_CALL_TYPE IS NOT NULL
+        WHERE CC.VIDEOMED_CALL_TYPE IS NOT NULL AND CC.NUMBER_CONSULTS = 1
         ORDER BY CC.CREATED_AT DESC
         """
         return pd.read_sql_query(query, conn)
@@ -109,7 +123,7 @@ def patient_messaging(snowflake_username, snowflake_password ):
     if selected_patient_id:
         patient_data = filtered_data[filtered_data['PATIENT_ID'] == selected_patient_id]
         # Prepare JSON with fields already in JSON format
-        patient_json = patient_data[['AGE', 'CATEGORY', 'RESPONSES', 'STAFF_NAME', 'VIDEOMED_CALL_TYPE', 'DATA']].to_dict(orient='records')
+        patient_json = patient_data[['PATIENT_NAME', 'AGE', 'CATEGORY', 'RESPONSES', 'STAFF_NAME', 'VIDEOMED_CALL_TYPE', 'DATA']].to_dict(orient='records')
 
         # Display JSON in a collapsible section
         with st.expander("See Processed JSON for LLM"):

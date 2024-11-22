@@ -64,6 +64,7 @@ def geolocation_spread(snowflake_username, snowflake_password):
 ,CONSOLIDATED         AS (
             SELECT
                 U.USER_ID           AS PATIENT_ID,
+                CONCAT_WS(' ', U.FIRST_NAME, U.LAST_NAME)       AS PATIENT_NAME,
                 U.CREATED_AT AS CREATED_AT,
                 U.OPERATING_SYSTEM,
                 U.AGE_GROUP,
@@ -262,7 +263,7 @@ LEFT JOIN PAYMENTS P
         filtered_data = st.session_state['filtered_data']
         patient_ids = filtered_data['PATIENT_ID'].unique()
         selected_patient_id = st.selectbox("Select a Patient", options=patient_ids)
-        def generate_personalized_message(patient_id, gender, nearby_users_count, top_icd10_code, age_group_summary, city_name):
+        def generate_personalized_message(patient_id, gender, nearby_users_count, top_icd10_code, age_group_summary, city_name, patient_name):
             """
             Generate a personalized message using LLM based on the user's proximity data.
             """
@@ -273,7 +274,7 @@ LEFT JOIN PAYMENTS P
             This should tell them more about the diagnoses in their area. Mention the following in your message "we have some health data trends that might interest you". 
             If you mention a link, format it using Markdown so that the text is hyperlinked. 
             If for any field there is no data available then do not speak about that factor, particularly icd10 code data if there's no data available then don't even bother putting the link to the user.:
-            
+            - Patient Name: {patient_name}
             - Gender: {gender}
             - Nearby Users Count: {nearby_users_count}
             - Top Health Condition (ICD10): {top_icd10_code}
@@ -296,6 +297,7 @@ LEFT JOIN PAYMENTS P
             user_lat, user_lon = selected_user['LATITUDE'], selected_user['LONGITUDE']
             user_gender = selected_user['GENDER']
             user_city = selected_user['CITY']
+            patient_name = selected_user['PATIENT_NAME']
 
             # Filter users within a 100km radius
             filtered_data['distance_km'] = filtered_data.apply(
@@ -319,7 +321,7 @@ LEFT JOIN PAYMENTS P
             st.markdown(f"""
                 <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.1);">
                     <h2 style="color: #4e5c6e;">Activity Summary for {user_gender} Users Near {selected_patient_id}</h2>
-                    <p><strong>🏠 Selected Patient:</strong> {selected_patient_id}</p>
+                    <p><strong>🏠 Selected Patient:</strong> {patient_name} {selected_patient_id}</p>
                     <p><strong>🌍 Location:</strong> {user_city}</p>
                     <p><strong>📍 Proximity (100km):</strong> {len(nearby_users)} users</p>
                     <p><strong>📊 Most Common Age Group:</strong> {age_group_summary}</p>
@@ -335,7 +337,8 @@ LEFT JOIN PAYMENTS P
                 nearby_users_count=len(nearby_users),
                 top_icd10_code=top_icd10_code,
                 age_group_summary=age_group_summary, 
-                city_name=user_city
+                city_name=user_city,
+                patient_name = patient_name
             )
 
             st.markdown(f"""
